@@ -68,7 +68,7 @@ struct CommandOutput {
     std::string stderr_content;
 };
 
-static std::vector<std::string> parse_env_flags(std::string_view env) {
+static std::vector<std::string> parse_flags(std::string_view env) {
     std::vector<std::string> result;
     std::string buffer;
 
@@ -112,12 +112,14 @@ static std::vector<std::string> parse_env_flags(std::string_view env) {
 
 static inline std::vector<std::string> get_env_flags(const char* name) {
     if (const char* env = std::getenv(name)) {
-        return parse_env_flags(env);
+        return parse_flags(env);
     }
     return {};
 }
 
+// {{{ Platform specific thingy
 
+// Execute command using parameter `argv`.
 inline CommandOutput execute_command(const std::vector<std::string>& argv) {
     log("INFO", "Executing command: {}", render_command(argv));
 
@@ -167,6 +169,8 @@ inline CommandOutput execute_command(const std::vector<std::string>& argv) {
     }
 }
 
+// }}}
+
 // Checks if file a is newer than file b.
 inline bool is_newer(std::string_view a, std::string_view b) {
     auto a_time = std::filesystem::last_write_time(a);
@@ -174,6 +178,10 @@ inline bool is_newer(std::string_view a, std::string_view b) {
     return a_time > b_time;
 }
 
+// {{{Raw compilation thingy
+
+// Compile C source file `src` into artifact `dest`.
+// Optional arguments includes `args` to pass extra flags to the compiler and `link_executable` that denotes whether the artifact is an executable.
 inline void compile_c_source(std::string_view src, std::string_view dest, const std::vector<std::string>& args = {}, bool link_executable = true) {
     std::vector<std::string> compiler_args;
     if (auto env = std::getenv("CC")) {
@@ -211,6 +219,8 @@ inline void compile_c_source(std::string_view src, std::string_view dest, const 
     }
 }
 
+// Compile C++ source file `src` into artifact `dest`.
+// Optional arguments includes `args` to pass extra flags to the compiler and `link_executable` that denotes whether the artifact is an executable.
 inline void compile_cxx_source(std::string_view src, std::string_view dest, const std::vector<std::string>& args = {}, bool link_executable = true) {
     std::vector<std::string> compiler_args;
     if (auto env = std::getenv("CXX")) {
@@ -248,6 +258,9 @@ inline void compile_cxx_source(std::string_view src, std::string_view dest, cons
     }
 }
 
+// }}}
+
+// If the `dest` doesn't exist or older than `src`, call `compile_cxx_source` with given arguments.
 inline void compile_cxx_if_necessary(std::string_view src, std::string_view dest, const std::vector<std::string>& args = {}, bool link_executable = true) {
     if (std::filesystem::exists(dest) && is_newer(dest, src)) {
         return;
@@ -256,6 +269,7 @@ inline void compile_cxx_if_necessary(std::string_view src, std::string_view dest
     compile_cxx_source(src, dest, args, link_executable);
 }
 
+// If the `dest` doesn't exist or older than `src`, call `compile_c_source` with given arguments.
 inline void compile_c_if_necessary(std::string_view src, std::string_view dest, const std::vector<std::string>& args = {}, bool link_executable = true) {
     if (std::filesystem::exists(dest) && is_newer(dest, src)) {
         return;
@@ -264,6 +278,7 @@ inline void compile_c_if_necessary(std::string_view src, std::string_view dest, 
     compile_c_source(src, dest, args, link_executable);
 }
 
+// Rebuild the build script if source has been modified.
 inline void go_rebuild_urself(int argc, char **argv, std::source_location loc = std::source_location::current()) {
     using namespace std::string_literals;
     if (is_newer(loc.file_name(), argv[0])) {

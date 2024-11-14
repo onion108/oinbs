@@ -168,7 +168,7 @@ inline CommandOutput execute_command(const std::vector<std::string>& argv) {
 }
 
 // Checks if file a is newer than file b.
-inline bool is_newer(const std::string& a, const std::string& b) {
+inline bool is_newer(std::string_view a, std::string_view b) {
     auto a_time = std::filesystem::last_write_time(a);
     auto b_time = std::filesystem::last_write_time(b);
     return a_time > b_time;
@@ -210,6 +210,7 @@ inline void compile_c_source(std::string_view src, std::string_view dest, const 
         throw std::runtime_error("Compilation failed");
     }
 }
+
 inline void compile_cxx_source(std::string_view src, std::string_view dest, const std::vector<std::string>& args = {}, bool link_executable = true) {
     std::vector<std::string> compiler_args;
     if (auto env = std::getenv("CXX")) {
@@ -245,6 +246,22 @@ inline void compile_cxx_source(std::string_view src, std::string_view dest, cons
         log("ERROR", "Compilation failed with: \n{}", result.stderr_content);
         throw std::runtime_error("Compilation failed");
     }
+}
+
+inline void compile_cxx_if_necessary(std::string_view src, std::string_view dest, const std::vector<std::string>& args = {}, bool link_executable = true) {
+    if (std::filesystem::exists(dest) && is_newer(dest, src)) {
+        return;
+    }
+
+    compile_cxx_source(src, dest, args, link_executable);
+}
+
+inline void compile_c_if_necessary(std::string_view src, std::string_view dest, const std::vector<std::string>& args = {}, bool link_executable = true) {
+    if (std::filesystem::exists(dest) && is_newer(dest, src)) {
+        return;
+    }
+
+    compile_c_source(src, dest, args, link_executable);
 }
 
 inline void go_rebuild_urself(int argc, char **argv, std::source_location loc = std::source_location::current()) {

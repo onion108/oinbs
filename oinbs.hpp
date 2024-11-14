@@ -1,6 +1,7 @@
 #pragma once
 
 #if defined(__cplusplus)
+#include <type_traits>
 #include <string>
 #include <source_location>
 #include <filesystem>
@@ -21,6 +22,9 @@
 
 #define OINBS_NAMESPACE_BEGIN namespace oinbs {
 #define OINBS_NAMESPACE_END }
+
+#define FEATURE_PKG_CONFIG_BEGIN namespace pkg_config {
+#define FEATURE_PKG_CONFIG_END }
 
 
 OINBS_NAMESPACE_BEGIN
@@ -118,6 +122,13 @@ static inline std::vector<std::string> get_env_flags(const char* name) {
 }
 
 // {{{ Platform specific thingy
+
+// Load executable and replace current process.
+inline void execute_nofork(char **argv) {
+    if (execvp(argv[0], argv) == -1) {
+        throw std::runtime_error("Failed to spawn process");
+    }
+}
 
 // Execute command using parameter `argv`.
 inline CommandOutput execute_command(const std::vector<std::string>& argv) {
@@ -284,8 +295,88 @@ inline void go_rebuild_urself(int argc, char **argv, std::source_location loc = 
     if (is_newer(loc.file_name(), argv[0])) {
         log("INFO", "Self-rebuilding... ");
         compile_cxx_source(loc.file_name(), argv[0], { "-std=c++20"s });
+        execute_nofork(argv);
     }
 }
+
+template <typename Fn>
+inline void guard_exception(Fn&& f) requires std::is_invocable_v<Fn> {
+    try {
+        f();
+    } catch (const std::exception& e) {
+        log("ERROR", "Compilation stopped due to exception: {}", e.what());
+    }
+}
+
+// {{{ PkgConfig stuff
+FEATURE_PKG_CONFIG_BEGIN
+
+class PackageNotFoundError : public std::exception {
+    private:
+    std::string name;
+    std::string msg;
+    public:
+    PackageNotFoundError(const std::string& package_name) : name(package_name) {
+        msg = std::format("Cannot find pacakge {} via pkg-config. ", name);
+    }
+    const char * what() const noexcept override {
+        return msg.c_str();
+    }
+    const std::string& get_name() const noexcept {
+        return name;
+    }
+};
+
+struct Package {
+    std::vector<std::string> cflags;
+    std::vector<std::string> libs;
+
+    void add_cflags_to(std::vector<std::string>& flags) {
+        for (const auto& flag : cflags) {
+            flags.push_back(flag);
+        }
+    }
+
+    void add_libs_to(std::vector<std::string>& flags) {
+        for (const auto& flag : libs) {
+            flags.push_back(flag);
+        }
+    }
+};
+
+// Check whether `pkg-config` is installed.
+inline bool has_pkg_config() {
+    try {
+        auto result = execute_command({ "pkg-config", "--version" });
+        return result.ret_code == 0;
+    } catch (const std::runtime_error& e) {
+        log("WARNING", "Runtime Error caught: {}", e.what());
+        return false;
+    }
+}
+
+// Find package using `pkg-config`.
+inline Package find_package(std::string_view name) {
+    log("INFO", "Finding package {}", name);
+    if (!has_pkg_config()) {
+        throw std::runtime_error("No pkg-config found! ");
+    }
+    std::string name_s(name);
+
+    auto cflags_res = execute_command({ "pkg-config", "--cflags", name_s });
+    auto libs_res = execute_command({ "pkg-config", "--libs", name_s });
+    if (cflags_res.ret_code == -1) {
+        throw PackageNotFoundError(name_s);
+    }
+
+    Package result;
+    result.cflags = parse_flags(cflags_res.stdout_content);
+    result.libs = parse_flags(libs_res.stdout_content);
+    return result;
+}
+
+FEATURE_PKG_CONFIG_END
+// }}}
 
 OINBS_NAMESPACE_END
 

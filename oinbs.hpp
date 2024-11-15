@@ -123,6 +123,7 @@ inline void guard_exception(Fn&& f) requires std::is_invocable_v<Fn> {
         f();
     } catch (const std::exception& e) {
         log("ERROR", "Compilation stopped due to exception: {}", e.what());
+        std::exit(1);
     }
 }
 
@@ -410,7 +411,7 @@ inline void link_artifact(std::vector<std::string> objects, std::string artifact
 
 // }}}
 
-/// {{{ More compilation thingy
+// {{{ More compilation thingy
 
 // If the `dest` doesn't exist or older than `src`, call `compile_cxx_source` with given arguments.
 inline void compile_cxx_if_necessary(std::string_view src, std::string_view dest, const std::vector<std::string>& args = {}, bool link_executable = true) {
@@ -440,7 +441,7 @@ inline void go_rebuild_urself(int argc, char **argv, std::source_location loc = 
     }
 }
 
-/// }}}
+// }}}
 
 // {{{ File extension checks
 

@@ -117,11 +117,14 @@ inline std::string render_command(const std::vector<std::string>& args) {
     return result;
 }
 
-struct CommandOutput {
-    int ret_code;
-    std::string stdout_content;
-    std::string stderr_content;
-};
+template <typename Fn>
+inline void guard_exception(Fn&& f) requires std::is_invocable_v<Fn> {
+    try {
+        f();
+    } catch (const std::exception& e) {
+        log("ERROR", "Compilation stopped due to exception: {}", e.what());
+    }
+}
 
 static std::vector<std::string> parse_flags(std::string_view env) {
     std::vector<std::string> result;
@@ -172,9 +175,27 @@ static inline std::vector<std::string> get_env_flags(const char* name) {
     return {};
 }
 
+inline std::vector<std::string> walk_dir(std::filesystem::path path) {
+    std::vector<std::string> result;
+    if (!std::filesystem::exists(path) || !std::filesystem::is_directory(path)) {
+        throw std::runtime_error(std::format("{} is not a valid path! ", path.string()));
+    }
+    for (auto i : std::filesystem::recursive_directory_iterator(path)) {
+        result.push_back(i.path());
+    }
+    return result;
+}
+
 // }}}
 
 // {{{ Platform specific thingy
+
+// Structure represents the result of a command execution.
+struct CommandOutput {
+    int ret_code;
+    std::string stdout_content;
+    std::string stderr_content;
+};
 
 // Load executable and replace current process.
 inline void execute_nofork(char **argv) {
@@ -234,6 +255,7 @@ inline CommandOutput execute_command(const std::vector<std::string>& argv) {
 }
 
 // }}}
+
 // {{{Raw compilation thingy
 
 // Compile C source file `src` into artifact `dest`.
@@ -388,6 +410,8 @@ inline void link_artifact(std::vector<std::string> objects, std::string artifact
 
 // }}}
 
+/// {{{ More compilation thingy
+
 // If the `dest` doesn't exist or older than `src`, call `compile_cxx_source` with given arguments.
 inline void compile_cxx_if_necessary(std::string_view src, std::string_view dest, const std::vector<std::string>& args = {}, bool link_executable = true) {
     if (std::filesystem::exists(dest) && is_newer(dest, src)) {
@@ -416,14 +440,7 @@ inline void go_rebuild_urself(int argc, char **argv, std::source_location loc = 
     }
 }
 
-template <typename Fn>
-inline void guard_exception(Fn&& f) requires std::is_invocable_v<Fn> {
-    try {
-        f();
-    } catch (const std::exception& e) {
-        log("ERROR", "Compilation stopped due to exception: {}", e.what());
-    }
-}
+/// }}}
 
 // {{{ File extension checks
 
@@ -448,17 +465,6 @@ inline bool is_c_header(std::string name) {
 }
 
 // }}}
-
-inline std::vector<std::string> walk_dir(std::filesystem::path path) {
-    std::vector<std::string> result;
-    if (!std::filesystem::exists(path) || !std::filesystem::is_directory(path)) {
-        throw std::runtime_error(std::format("{} is not a valid path! ", path.string()));
-    }
-    for (auto i : std::filesystem::recursive_directory_iterator(path)) {
-        result.push_back(i.path());
-    }
-    return result;
-}
 
 // {{{ PkgConfig stuff
 FEATURE_PKG_CONFIG_BEGIN

@@ -6,7 +6,6 @@
 #include <source_location>
 #include <filesystem>
 #include <vector>
-#include <unistd.h>
 #include <format>
 #include <stdexcept>
 #include <cstring>
@@ -18,7 +17,6 @@
 #error No windows support yet.
 #else
 #include <unistd.h>
-#include <sys/stat.h>
 #endif
 
 #define OINBS_NAMESPACE_BEGIN namespace oinbs {

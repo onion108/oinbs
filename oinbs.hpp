@@ -13,6 +13,7 @@
 #include <cstring>
 #include <exception>
 #include <iostream>
+#include <fstream>
 #include <string_view>
 #ifdef _WIN32
 #error No windows support yet.
@@ -29,6 +30,56 @@
 
 OINBS_NAMESPACE_BEGIN
 
+// {{{ Utilities
+
+// Escapes string
+inline std::string escape_string(std::string_view str) {
+    if (str.empty()) return "";
+
+    using namespace std::string_literals;
+    auto result = "\""s;
+    for (auto ch : str) {
+        if (ch == '\n') {
+            result += "\\n";
+            continue;
+        }
+        if (ch == '\t') {
+            result += "\\t";
+            continue;
+        }
+        if (ch == '\\') {
+            result += "\\\\";
+            continue;
+        }
+        if (ch == '\"') {
+            result += "\\\"";
+            continue;
+        }
+
+        result += ch;
+    }
+    result += "\"";
+    return result;
+}
+
+// Checks if file a is newer than file b.
+inline bool is_newer(std::string_view a, std::string_view b) {
+    auto a_time = std::filesystem::last_write_time(a);
+    auto b_time = std::filesystem::last_write_time(b);
+    return a_time > b_time;
+}
+
+inline std::string get_cc() {
+    auto cc = std::getenv("CC");
+    return cc ? cc : "cc";
+}
+
+inline std::string get_cxx() {
+    auto cxx= std::getenv("CXX");
+    return cxx ? cxx : "cxx";
+}
+
+// Log stuff.
 inline void log(std::string_view level, std::string_view fmt, auto&&... args) {
     std::cerr << "[" << level << "] " << std::vformat(fmt, std::make_format_args(args...)) << "\n";
 }
@@ -121,6 +172,8 @@ static inline std::vector<std::string> get_env_flags(const char* name) {
     return {};
 }
 
+// }}}
+
 // {{{ Platform specific thingy
 
 // Load executable and replace current process.
@@ -144,7 +197,7 @@ inline CommandOutput execute_command(const std::vector<std::string>& argv) {
         dup2(perr[1], STDERR_FILENO);
         close(pout[0]); close(pout[1]);
         close(perr[0]); close(perr[1]);
-        
+
         // Doing dirty C stuffs
         // A little memory leak here should be ok.
         char **c_argv = new char*[argv.size()+1];
@@ -181,24 +234,6 @@ inline CommandOutput execute_command(const std::vector<std::string>& argv) {
 }
 
 // }}}
-
-// Checks if file a is newer than file b.
-inline bool is_newer(std::string_view a, std::string_view b) {
-    auto a_time = std::filesystem::last_write_time(a);
-    auto b_time = std::filesystem::last_write_time(b);
-    return a_time > b_time;
-}
-
-inline std::string get_cc() {
-    auto cc = std::getenv("CC");
-    return cc ? cc : "cc";
-}
-
-inline std::string get_cxx() {
-    auto cxx= std::getenv("CXX");
-    return cxx ? cxx : "cxx";
-}
-
 // {{{Raw compilation thingy
 
 // Compile C source file `src` into artifact `dest`.
@@ -291,7 +326,7 @@ enum class ArtifactType {
 };
 
 inline std::string shared_library_name(std::string_view name) {
-    #ifdef __MACH__ 
+    #ifdef __MACH__
     return std::format("lib{}.dylib", name);
     #elif defined(_WIN32) || defined(_WIN64)
     return std::format("{}.dll", name);
@@ -493,6 +528,121 @@ inline Package find_package(std::string_view name) {
 }
 
 FEATURE_PKG_CONFIG_END
+// }}}
+
+
+// {{{ Compilation Database stuff
+
+class CompilationDatabase {
+    struct Entry {
+        std::vector<std::string> args;
+        std::string dir;
+        std::string file;
+        std::string output;
+    };
+
+    struct Operation {
+        std::string src;
+        std::string dest;
+        std::vector<std::string> args;
+        bool link_executable;
+        bool is_cxx;
+    };
+
+
+    std::vector<Operation> m_operations;
+    bool m_use_lazy_compilation;
+    std::string m_render_entry(const Entry& entry) {
+        std::string args;
+        if (entry.args.empty()) {
+            args = "[]";
+        } else {
+            args = "[";
+            args += escape_string(entry.args[0]);
+            for (auto arg = entry.args.begin()+1; arg != entry.args.end(); arg++) {
+                args += ",";
+                args += escape_string(*arg);
+            }
+            args += "]";
+        }
+        std::string result = "{";
+        result += "\"arguments\": ";
+        result += args;
+        result += ", \"directory\": ";
+        result += escape_string(std::filesystem::current_path().string());
+        result += ", \"file\": ";
+        result += escape_string(std::filesystem::absolute(entry.file).string());
+        result += ", \"output\": ";
+        result += escape_string(std::filesystem::absolute(entry.output).string());
+        result += "}";
+        return result;
+    }
+    public:
+    CompilationDatabase(bool lazy = true) : m_operations(), m_use_lazy_compilation(lazy) {}
+    void compile_c_source(const std::string& src, const std::string& dest, const std::vector<std::string>& args = {}, bool link_executable = true) {
+        m_operations.push_back({ src, dest, args, link_executable, false});
+    }
+
+    void compile_cxx_source(const std::string& src, const std::string& dest, const std::vector<std::string>& args = {}, bool link_executable = true) {
+        m_operations.push_back({ src, dest, args, link_executable, true});
+    }
+
+    void perform() {
+        auto cmp_c = oinbs::compile_c_source;
+        auto cmp_cxx = oinbs::compile_cxx_source;
+        if (m_use_lazy_compilation) {
+            cmp_c = oinbs::compile_c_if_necessary;
+            cmp_cxx = oinbs::compile_cxx_if_necessary;
+        }
+        for (auto operation : m_operations) {
+            if (operation.is_cxx) {
+                cmp_cxx(operation.src, operation.dest, operation.args, operation.link_executable);
+            } else {
+                cmp_c(operation.src, operation.dest, operation.args, operation.link_executable);
+            }
+        }
+    }
+
+    std::string generate_database() {
+        std::vector<Entry> db;
+        for (auto operation : m_operations) {
+            Entry e;
+            e.args.push_back(operation.is_cxx ? get_cxx() : get_cc());
+            e.args.push_back("-c");
+            e.args.push_back("-o");
+            e.args.push_back(operation.dest);
+            for (auto flag : operation.args) {
+                e.args.push_back(flag);
+            }
+            for (auto flag : get_env_flags(operation.is_cxx ? "CXXFLAGS" : "CFLAGS")) {
+                e.args.push_back(flag);
+            }
+            db.push_back(e);
+        }
+
+        if (db.size() == 0) {
+            return "[]";
+        }
+
+        std::string result = "[";
+        result += m_render_entry(db[0]);
+        for (auto entry = db.begin()+1; entry != db.end(); entry++) {
+            result += ", ";
+            result += m_render_entry(*entry);
+        }
+        result += "]";
+        return result;
+    }
+
+    void build() {
+        perform();
+        auto db = generate_database();
+        std::ofstream comp_db("compile_commands.json");
+        comp_db << db << '\n';
+    }
+
+};
+
 // }}}
 
 OINBS_NAMESPACE_END

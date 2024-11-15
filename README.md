@@ -53,7 +53,25 @@ And you're ready to go!
 
 ## Compilation Database
 
-Currently there is no way to generate compilation database from the build script using the library. However you can use [Bear](https://github.com/rizsotto/Bear) to make `compile_commands.json` while compiling. It also works while with Mr.Azozin's [nob.h](https://github.com/tsoding/nob.h), by the way.
+You can use the class `CompilationDatabase` to generate compilation database. This class provides methods `compile_cxx_source` and `compile_c_source` that has the same signature as in the `oinbs` namespace, and we use a parameter when constructing the database (`lazy`) to indicate whether to use `compile_*_if_necessary` or `compile_*-source`. The `build` method performs the compilation and writes the compilation process into `compile_flags.json`. Notice that it doesn't handle linking so you still need to link by yourself after calling `build` method.
+
+Here is the same example at the start with compilation database support enabled: 
+
+```c++
+#include "oinbs.hpp"
+#include <string>
+
+int main(int argc, char **argv) {
+    using namespace oinbs;
+    using namespace std::string_literals;
+    go_rebuild_urself(argc, argv);
+
+    CompilationDatabase compdb(false); // Set to false because the first example doesn't use compil_*_if_necessary
+    compdb.compile_cxx_source("main.cc", "main", { "-std=c++20"s });
+    compdb.build();
+}
+
+```
 
 ## Roadmap
 

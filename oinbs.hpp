@@ -189,6 +189,16 @@ inline bool is_newer(std::string_view a, std::string_view b) {
     return a_time > b_time;
 }
 
+inline std::string get_cc() {
+    auto cc = std::getenv("CC");
+    return cc ? cc : "cc";
+}
+
+inline std::string get_cxx() {
+    auto cxx= std::getenv("CXX");
+    return cxx ? cxx : "cxx";
+}
+
 // {{{Raw compilation thingy
 
 // Compile C source file `src` into artifact `dest`.
@@ -271,6 +281,78 @@ inline void compile_cxx_source(std::string_view src, std::string_view dest, cons
 
 // }}}
 
+// {{{Raw linking thingy
+
+// Artifact type.
+enum class ArtifactType {
+    Executable,
+    SharedLibrary,
+    StaticLibrary,
+};
+
+inline std::string shared_library_name(std::string_view name) {
+    #ifdef __MACH__ 
+    return std::format("lib{}.dylib", name);
+    #elif defined(_WIN32) || defined(_WIN64)
+    return std::format("{}.dll", name);
+    #else
+    return std::format("lib{}.so", name);
+    #endif
+}
+
+// Link (or archive) objects into artifact.
+// If `artifact_type` is set to `SharedLibrary` or `StaticLibrary`, file extension will be automatically added.
+inline void link_artifact(std::vector<std::string> objects, std::string artifact, std::vector<std::string> flags = {}, ArtifactType artifact_type = ArtifactType::Executable, bool use_cxx_stdlib = true) {
+    switch (artifact_type) {
+        case ArtifactType::Executable: {
+            auto linker = use_cxx_stdlib ? get_cxx() : get_cc();
+            std::vector<std::string> cmd;
+            cmd.push_back(linker);
+            cmd.push_back("-o");
+            cmd.push_back(artifact);
+            for (const auto& i : flags) cmd.push_back(i);
+            for (const auto& i : get_env_flags("LDFLAGS")) cmd.push_back(i);
+            for (const auto& i : objects) cmd.push_back(i);
+            auto result = execute_command(cmd);
+            if (result.ret_code != 0) {
+                log("ERROR", "Linking failed with: \n{}", result.stderr_content);
+                throw std::runtime_error("Linking failed");
+            }
+        } break;
+
+        case ArtifactType::SharedLibrary: {
+            auto linker = use_cxx_stdlib ? get_cxx() : get_cc();
+            std::vector<std::string> cmd;
+            cmd.push_back(linker);
+            cmd.push_back("-o");
+            cmd.push_back(shared_library_name(artifact));
+            cmd.push_back("-shared");
+            for (const auto& i : flags) cmd.push_back(i);
+            for (const auto& i : get_env_flags("LDFLAGS")) cmd.push_back(i);
+            for (const auto& i : objects) cmd.push_back(i);
+            auto result = execute_command(cmd);
+            if (result.ret_code != 0) {
+                log("ERROR", "Linking failed with: \n{}", result.stderr_content);
+                throw std::runtime_error("Linking failed");
+            }
+        } break;
+
+        case ArtifactType::StaticLibrary: {
+            std::vector<std::string> cmd { "ar", "-rc" };
+            for (const auto& i : objects) {
+                cmd.push_back(i);
+            }
+            auto result = execute_command(cmd);
+            if (result.ret_code != 0) {
+                log("ERROR", "Archiving failed with: \n{}", result.stderr_content);
+                throw std::runtime_error("Archiving failed");
+            }
+        } break;
+    }
+}
+
+// }}}
+
 // If the `dest` doesn't exist or older than `src`, call `compile_cxx_source` with given arguments.
 inline void compile_cxx_if_necessary(std::string_view src, std::string_view dest, const std::vector<std::string>& args = {}, bool link_executable = true) {
     if (std::filesystem::exists(dest) && is_newer(dest, src)) {
@@ -306,6 +388,41 @@ inline void guard_exception(Fn&& f) requires std::is_invocable_v<Fn> {
     } catch (const std::exception& e) {
         log("ERROR", "Compilation stopped due to exception: {}", e.what());
     }
+}
+
+// {{{ File extension checks
+
+// Check if input is C++ source file.
+inline bool is_cxx_source(std::string_view name) {
+    return name.ends_with(".cc") || name.ends_with(".cxx") || name.ends_with(".cpp");
+}
+
+// Check if input is C source file.
+inline bool is_c_source(std::string_view name) {
+    return name.ends_with(".c");
+}
+
+// Check if input is C++ header file.
+inline bool is_cxx_header(std::string name) {
+    return name.ends_with(".h") || name.ends_with(".hh") || name.ends_with(".hpp");
+}
+
+// Check if input is C header file.
+inline bool is_c_header(std::string name) {
+    return name.ends_with(".h");
+}
+
+// }}}
+
+inline std::vector<std::string> walk_dir(std::filesystem::path path) {
+    std::vector<std::string> result;
+    if (!std::filesystem::exists(path) || !std::filesystem::is_directory(path)) {
+        throw std::runtime_error(std::format("{} is not a valid path! ", path.string()));
+    }
+    for (auto i : std::filesystem::recursive_directory_iterator(path)) {
+        result.push_back(i.path());
+    }
+    return result;
 }
 
 // {{{ PkgConfig stuff

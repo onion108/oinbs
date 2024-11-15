@@ -259,15 +259,10 @@ inline CommandOutput execute_command(const std::vector<std::string>& argv) {
 
 // {{{Raw compilation thingy
 
-// Compile C source file `src` into artifact `dest`.
-// Optional arguments includes `args` to pass extra flags to the compiler and `link_executable` that denotes whether the artifact is an executable.
-inline void compile_c_source(std::string_view src, std::string_view dest, const std::vector<std::string>& args = {}, bool link_executable = true) {
+// Generates argv from a compilation call. Defaults to C and if `is_cxx` was set to `true` then C++.
+inline std::vector<std::string> generate_compilation_argv(bool is_cxx, std::string_view src, std::string_view dest, const std::vector<std::string>& args, bool link_executable) {
     std::vector<std::string> compiler_args;
-    if (auto env = std::getenv("CC")) {
-        compiler_args.push_back(env);
-    } else {
-        compiler_args.push_back("cc");
-    }
+    compiler_args.push_back(is_cxx ? get_cxx() : get_cc());
 
     if (!link_executable) {
         compiler_args.push_back("-c");
@@ -279,7 +274,7 @@ inline void compile_c_source(std::string_view src, std::string_view dest, const 
         compiler_args.push_back(arg);
     }
 
-    for (const auto& arg : get_env_flags("CFLAGS")) {
+    for (const auto& arg : get_env_flags(is_cxx ? "CXXFLAGS" : "CFLAGS")) {
         compiler_args.push_back(arg);
     }
 
@@ -290,8 +285,13 @@ inline void compile_c_source(std::string_view src, std::string_view dest, const 
     }
 
     compiler_args.push_back(std::string(src));
+    return compiler_args;
+}
 
-    auto result = execute_command(compiler_args);
+// Compile C source file `src` into artifact `dest`.
+// Optional arguments includes `args` to pass extra flags to the compiler and `link_executable` that denotes whether the artifact is an executable.
+inline void compile_c_source(std::string_view src, std::string_view dest, const std::vector<std::string>& args = {}, bool link_executable = true) {
+    auto result = execute_command(generate_compilation_argv(false, src, dest, args, link_executable));
     if (result.ret_code != 0) {
         log("ERROR", "Compilation failed with: \n{}", result.stderr_content);
         throw std::runtime_error("Compilation failed");
@@ -301,36 +301,8 @@ inline void compile_c_source(std::string_view src, std::string_view dest, const 
 // Compile C++ source file `src` into artifact `dest`.
 // Optional arguments includes `args` to pass extra flags to the compiler and `link_executable` that denotes whether the artifact is an executable.
 inline void compile_cxx_source(std::string_view src, std::string_view dest, const std::vector<std::string>& args = {}, bool link_executable = true) {
-    std::vector<std::string> compiler_args;
-    if (auto env = std::getenv("CXX")) {
-        compiler_args.push_back(env);
-    } else {
-        compiler_args.push_back("c++");
-    }
 
-    if (!link_executable) {
-        compiler_args.push_back("-c");
-    }
-    compiler_args.push_back("-o");
-    compiler_args.push_back(std::string(dest));
-
-    for (const auto& arg : args) {
-        compiler_args.push_back(arg);
-    }
-
-    for (const auto& arg : get_env_flags("CXXFLAGS")) {
-        compiler_args.push_back(arg);
-    }
-
-    if (link_executable) {
-        for (const auto& arg : get_env_flags("LDFLAGS")) {
-            compiler_args.push_back(arg);
-        }
-    }
-
-    compiler_args.push_back(std::string(src));
-
-    auto result = execute_command(compiler_args);
+    auto result = execute_command(generate_compilation_argv(true, src, dest, args, link_executable));
     if (result.ret_code != 0) {
         log("ERROR", "Compilation failed with: \n{}", result.stderr_content);
         throw std::runtime_error("Compilation failed");
@@ -537,7 +509,6 @@ inline Package find_package(std::string_view name) {
 FEATURE_PKG_CONFIG_END
 // }}}
 
-
 // {{{ Compilation Database stuff
 
 class CompilationDatabase {
@@ -614,16 +585,9 @@ class CompilationDatabase {
         std::vector<Entry> db;
         for (auto operation : m_operations) {
             Entry e;
-            e.args.push_back(operation.is_cxx ? get_cxx() : get_cc());
-            e.args.push_back("-c");
-            e.args.push_back("-o");
-            e.args.push_back(operation.dest);
-            for (auto flag : operation.args) {
-                e.args.push_back(flag);
-            }
-            for (auto flag : get_env_flags(operation.is_cxx ? "CXXFLAGS" : "CFLAGS")) {
-                e.args.push_back(flag);
-            }
+            e.args = generate_compilation_argv(operation.is_cxx, operation.src, operation.dest, operation.args, operation.link_executable);
+            e.file = operation.src;
+            e.output = operation.dest;
             db.push_back(e);
         }
 

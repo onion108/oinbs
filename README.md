@@ -29,7 +29,7 @@ int main(int argc, char **argv) {
     guard_exception([&argc, &argv] {
         go_rebuild_urself(argc, argv);
 
-        // Your build code here! 
+        // Your build code here!
     });
 }
 
@@ -48,14 +48,14 @@ Replace `clang++` with the compiler you like (e.g. `g++`), as long as the compil
 ./oinb
 ```
 
-And you're ready to go! 
+And you're ready to go!
 
 
 ## Compilation Database
 
 You can use the class `CompilationDatabase` to generate compilation database. This class provides methods `compile_cxx_source` and `compile_c_source` that has the same signature as in the `oinbs` namespace, and we use a parameter when constructing the database (`lazy`) to indicate whether to use `compile_*_if_necessary` or `compile_*-source`. The `build` method performs the compilation and writes the compilation process into `compile_flags.json`. Notice that it doesn't handle linking so you still need to link by yourself after calling `build` method.
 
-Here is the same example at the start with compilation database support enabled: 
+Here is the same example at the start with compilation database support enabled:
 
 ```c++
 #include "oinbs.hpp"

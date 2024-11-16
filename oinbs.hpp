@@ -917,6 +917,13 @@ class Target {
         link_artifact(objs, m_build_dir / "dest" / m_target_name, m_ldflags, m_atype, !m_cxx_files.empty());
     }
 
+    // Clean the build directory
+    void clean() {
+        log("INFO", "Cleaning target {}", m_target_name);
+        if (std::filesystem::exists(m_build_dir))
+            std::filesystem::remove_all(m_build_dir);
+    }
+
 };
 
 // }}}

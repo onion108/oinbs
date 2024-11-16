@@ -77,6 +77,8 @@ int main(int argc, char **argv) {
 
 - [x] Support structural representation of targets (`class Target`) and `compile_commands.json` generation from it.
 - [ ] Support structural representation of a project (`class Project`) (which basically contains multiple targets hence should be easy to implement).
+- [ ] Supprot target installing.
 - [ ] Windows Support.
+- [ ] MSVC Support. (Not sure if it could be done by myself because I knew nothing about it.)
 
 

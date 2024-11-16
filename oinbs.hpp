@@ -1,6 +1,7 @@
 #pragma once
 
 #if defined(__cplusplus)
+#include <unordered_map>
 #include <type_traits>
 #include <string>
 #include <source_location>
@@ -25,6 +26,9 @@
 #define FEATURE_PKG_CONFIG_BEGIN namespace pkg_config {
 #define FEATURE_PKG_CONFIG_END }
 
+#ifndef ENABLE_FEATURE_PKG_CONFIG
+#define ENABLE_FEATURE_PKG_CONFIG 1
+#endif
 
 OINBS_NAMESPACE_BEGIN
 
@@ -330,7 +334,7 @@ inline std::string shared_library_name(std::string_view name) {
 
 // Link (or archive) objects into artifact.
 // If `artifact_type` is set to `SharedLibrary` or `StaticLibrary`, file extension will be automatically added.
-inline void link_artifact(std::vector<std::string> objects, std::string artifact, std::vector<std::string> flags = {}, ArtifactType artifact_type = ArtifactType::Executable, bool use_cxx_stdlib = true) {
+inline void link_artifact(const std::vector<std::string>& objects, std::string artifact, std::vector<std::string> flags = {}, ArtifactType artifact_type = ArtifactType::Executable, bool use_cxx_stdlib = true) {
     switch (artifact_type) {
         case ArtifactType::Executable: {
             auto linker = use_cxx_stdlib ? get_cxx() : get_cc();
@@ -438,6 +442,7 @@ inline bool is_c_header(std::string name) {
 // }}}
 
 // {{{ PkgConfig stuff
+#if ENABLE_FEATURE_PKG_CONFIG
 FEATURE_PKG_CONFIG_BEGIN
 
 class PackageNotFoundError : public std::exception {
@@ -505,6 +510,7 @@ inline Package find_package(std::string_view name) {
 }
 
 FEATURE_PKG_CONFIG_END
+#endif
 // }}}
 
 // {{{ Compilation Database stuff
@@ -613,6 +619,310 @@ class CompilationDatabase {
 };
 
 // }}}
+
+// {{{ Structural Representation (facny stuff)
+
+// {{{ Target
+
+// Class that represents a target.
+class Target {
+    ArtifactType m_atype;
+    std::vector<std::string> m_c_files;
+    std::vector<std::string> m_cflags;
+    std::vector<std::string> m_cxx_files;
+    std::vector<std::string> m_cxxflags;
+    std::vector<std::string> m_ldflags;
+    std::filesystem::path m_build_dir;
+    std::string m_target_name;
+
+    std::string m_generate_obj_name(std::string_view path) {
+        std::string result;
+        for (auto ch : path) {
+            switch (ch) {
+                case '/': {
+                    result += "$P";
+                } break;
+                case '$': {
+                    result += "$$";
+                } break;
+                case '.': {
+                    result += "$d";
+                } break;
+                default: {
+                    result += ch;
+                } break;
+            }
+        }
+        return result + ".o";
+    }
+
+    public:
+    Target(const std::string& target_name = "program", const std::string& build_dir = "./build") : m_atype(ArtifactType::Executable), m_build_dir(build_dir), m_target_name(target_name) {}
+
+    // Set target type to executable.
+    Target& executable() {
+        m_atype = ArtifactType::Executable;
+        return *this;
+    }
+
+    // Set target type to static library.
+    Target& static_library() {
+        m_atype = ArtifactType::StaticLibrary;
+        return *this;
+    }
+
+    // Set target type to shared library.
+    Target& shared_library() {
+        m_atype = ArtifactType::SharedLibrary;
+        return *this;
+    }
+
+    // Add C source file.
+    Target& add_c_source(std::string_view src) {
+        log("INFO", "Adding C source {}", src);
+        m_c_files.push_back(std::string { src });
+        return *this;
+    }
+
+    // Add C++ source file.
+    Target& add_cxx_source(std::string_view src) {
+        log("INFO", "Adding C++ source {}", src);
+        m_cxx_files.push_back(std::string { src });
+        return *this;
+    }
+
+    // Add multiple C source files.
+    Target& add_c_sources(std::vector<std::string> srcs) {
+        for (auto src : srcs) {
+            add_c_source(src);
+        }
+        return *this;
+    }
+
+    // Add multiple C++ source files.
+    Target& add_cxx_sources(std::vector<std::string> srcs) {
+        for (auto src : srcs) {
+            add_cxx_source(src);
+        }
+        return *this;
+    }
+
+    // Add compiler flag to C compiler.
+    Target& add_c_flag(std::string_view flag) {
+        m_cflags.push_back(std::string { flag });
+        return *this;
+    }
+
+    // Add compiler flag to C++ compiler.
+    Target& add_cxx_flag(std::string_view flag) {
+        m_cxxflags.push_back(std::string { flag });
+        return *this;
+    }
+
+    // Add compiler flags to C compiler.
+    Target& add_c_flags(const std::vector<std::string>& flags) {
+        for (auto flag : flags) {
+            add_c_flag(flag);
+        }
+        return *this;
+    }
+
+    // Add compiler flags to C++ compiler.
+    Target& add_cxx_flags(const std::vector<std::string>& flags) {
+        for (auto flag : flags) {
+            add_cxx_flag(flag);
+        }
+        return *this;
+    }
+
+    // Set C++ standard.
+    Target& set_cxx_standard(std::string_view ver) {
+        m_cxxflags.push_back(std::format("-std={}", ver));
+        return *this;
+    }
+
+    // Set C standard.
+    Target& set_c_standard(std::string_view ver) {
+        m_cflags.push_back(std::format("-std={}", ver));
+        return *this;
+    }
+
+    // Enable debug information.
+    Target& debug() {
+        m_cflags.push_back("-g");
+        m_cxxflags.push_back("-g");
+        return *this;
+    }
+
+    // Add include directory for C.
+    Target& add_include_directory_c(std::string_view dir) {
+        m_cflags.push_back(std::format("-I{}", dir));
+        return *this;
+    }
+
+    // Add include directory for C++.
+    Target& add_include_directory_cxx(std::string_view dir) {
+        m_cxxflags.push_back(std::format("-I{}", dir));
+        return *this;
+    }
+
+    // Add include directory.
+    Target& add_include_directory(std::string_view dir) {
+        m_cxxflags.push_back(std::format("-I{}", dir));
+        m_cflags.push_back(std::format("-I{}", dir));
+        return *this;
+    }
+
+    // Add link directory.
+    Target& add_link_directory(std::string_view dir) {
+        m_ldflags.push_back(std::format("-L{}", dir));
+        return *this;
+    }
+
+    // Add library.
+    Target& add_library(std::string_view lib) {
+        m_ldflags.push_back(std::format("-l{}", lib));
+        return *this;
+    }
+
+    // Add runtime path.
+    Target& add_rpath(std::string_view rpath) {
+        m_ldflags.push_back("-rpath");
+        m_ldflags.push_back(std::string { rpath });
+        return *this;
+    }
+
+    // Add linker flag.
+    Target& add_linker_flag(std::string_view flag) {
+        m_ldflags.push_back(std::string { flag });
+        return *this;
+    }
+
+    // Add linker flags.
+    Target& add_linker_flags(const std::vector<std::string>& flags) {
+        for (auto flag : flags) {
+            m_ldflags.push_back(flag);
+        }
+        return *this;
+    }
+
+    // Add bunch of sources in a directory.
+    Target& add_source_dir(std::string_view path) {
+        log("INFO", "Adding source directory {}", path);
+        if (!std::filesystem::exists(path) || !std::filesystem::is_directory(path)) {
+            throw std::runtime_error(std::format("{} is not a valid directory. ", path));
+        }
+
+        for (auto entry : std::filesystem::recursive_directory_iterator(path, std::filesystem::directory_options::follow_directory_symlink)) {
+            if (entry.is_directory()) continue;
+
+            auto path = entry.path().string();
+            if (is_c_source(path)) {
+                add_c_source(path);
+            } else if (is_cxx_source(path)) {
+                add_cxx_source(path);
+            }
+        }
+
+        return *this;
+    }
+
+#if ENABLE_FEATURE_PKG_CONFIG
+    Target& add_package_c(std::string_view pkg) {
+        if (!pkg_config::has_pkg_config()) {
+            throw std::runtime_error("No pkg-config found");
+        }
+
+        try {
+            auto package = pkg_config::find_package(pkg);
+            add_c_flags(package.cflags);
+            add_linker_flags(package.libs);
+        } catch (const pkg_config::PackageNotFoundError& e) {
+            log("ERROR", "Cannot find package {}", pkg);
+            throw e;
+        }
+        return *this;
+    }
+
+    Target& add_package_cxx(std::string_view pkg) {
+        if (!pkg_config::has_pkg_config()) {
+            throw std::runtime_error("No pkg-config found");
+        }
+
+        try {
+            auto package = pkg_config::find_package(pkg);
+            add_cxx_flags(package.cflags);
+            add_linker_flags(package.libs);
+        } catch (const pkg_config::PackageNotFoundError& e) {
+            log("ERROR", "Cannot find package {}", pkg);
+            throw e;
+        }
+        return *this;
+    }
+
+    Target& add_package(std::string_view pkg) {
+        if (!pkg_config::has_pkg_config()) {
+            throw std::runtime_error("No pkg-config found");
+        }
+
+        try {
+            auto package = pkg_config::find_package(pkg);
+            add_c_flags(package.cflags);
+            add_cxx_flags(package.cflags);
+            add_linker_flags(package.libs);
+        } catch (const pkg_config::PackageNotFoundError& e) {
+            log("ERROR", "Cannot find package {}", pkg);
+            throw e;
+        }
+        return *this;
+    }
+#endif
+
+    // Ready. Set. Go!
+    // Start the build process.
+    void build() {
+        log("INFO", "Building target {}", m_target_name);
+        CompilationDatabase compdb;
+        if (!std::filesystem::exists(m_build_dir)) {
+            std::filesystem::create_directories(m_build_dir);
+        }
+
+        if (!std::filesystem::exists(m_build_dir / "obj")) {
+            std::filesystem::create_directories(m_build_dir / "obj");
+        }
+
+        if (!std::filesystem::exists(m_build_dir / "dest")) {
+            std::filesystem::create_directories(m_build_dir / "dest");
+        }
+
+        log("INFO", "Compiling target {}", m_target_name);
+        std::unordered_map<std::string, std::string> src_to_obj;
+        for (auto cxxsrc : m_cxx_files) {
+            src_to_obj[cxxsrc] = m_generate_obj_name(cxxsrc);
+            compdb.compile_cxx_source(cxxsrc, m_build_dir / "obj" / src_to_obj[cxxsrc], m_cxxflags, false);
+        }
+
+        for (auto csrc : m_cxx_files) {
+            src_to_obj[csrc] = m_generate_obj_name(csrc);
+            compdb.compile_c_source(csrc, m_build_dir / "obj" / src_to_obj[csrc], m_cxxflags, false);
+        }
+
+        compdb.build();
+
+        log("INFO", "Linking or archiving target {}", m_target_name);
+        std::vector<std::string> objs;
+        for (auto kv : src_to_obj) {
+            objs.push_back(m_build_dir / "obj" / kv.second);
+        }
+        link_artifact(objs, m_build_dir / "dest" / m_target_name, m_ldflags, m_atype, !m_cxx_files.empty());
+    }
+
+};
+
+// }}}
+
+// }}}
+
 
 OINBS_NAMESPACE_END
 

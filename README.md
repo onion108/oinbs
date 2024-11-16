@@ -75,7 +75,7 @@ int main(int argc, char **argv) {
 
 ## Roadmap
 
-- [ ] Support structural representation of targets (`class Target`) and `compile_commands.json` generation from it.
+- [x] Support structural representation of targets (`class Target`) and `compile_commands.json` generation from it.
 - [ ] Support structural representation of a project (`class Project`) (which basically contains multiple targets hence should be easy to implement).
 - [ ] Windows Support.
 

@@ -586,13 +586,15 @@ class CompilationDatabase {
     }
 
     std::string generate_database() {
-        std::vector<Entry> db;
+
+        // Use unordered_map to avoid duplicated items.
+        std::unordered_map<std::string, Entry> db;
         for (auto operation : m_operations) {
             Entry e;
             e.args = generate_compilation_argv(operation.is_cxx, operation.src, operation.dest, operation.args, operation.link_executable);
             e.file = operation.src;
             e.output = operation.dest;
-            db.push_back(e);
+            db[e.file] = e;
         }
 
         if (db.size() == 0) {
@@ -600,10 +602,10 @@ class CompilationDatabase {
         }
 
         std::string result = "[";
-        result += m_render_entry(db[0]);
-        for (auto entry = db.begin()+1; entry != db.end(); entry++) {
+        result += m_render_entry(db.begin()->second);
+        for (auto entry = ++db.begin(); entry != db.end(); entry++) {
             result += ", ";
-            result += m_render_entry(*entry);
+            result += m_render_entry(entry->second);
         }
         result += "]";
         return result;
@@ -635,6 +637,8 @@ class Target {
     std::filesystem::path m_build_dir;
     std::string m_target_name;
 
+    // Generates object file name from a path.
+    // This generates a unique name for every path, and always generates same name for the same path.
     std::string m_generate_obj_name(std::string_view path) {
         std::string result;
         for (auto ch : path) {
@@ -828,6 +832,7 @@ class Target {
     }
 
 #if ENABLE_FEATURE_PKG_CONFIG
+    // Add a package from pkg-config for C sources.
     Target& add_package_c(std::string_view pkg) {
         if (!pkg_config::has_pkg_config()) {
             throw std::runtime_error("No pkg-config found");
@@ -844,6 +849,7 @@ class Target {
         return *this;
     }
 
+    // Add a package from pkg-config for C++ sources.
     Target& add_package_cxx(std::string_view pkg) {
         if (!pkg_config::has_pkg_config()) {
             throw std::runtime_error("No pkg-config found");
@@ -860,6 +866,7 @@ class Target {
         return *this;
     }
 
+    // Add a package from pkg-config for entire target.
     Target& add_package(std::string_view pkg) {
         if (!pkg_config::has_pkg_config()) {
             throw std::runtime_error("No pkg-config found");
@@ -878,11 +885,16 @@ class Target {
     }
 #endif
 
-    // Ready. Set. Go!
     // Start the build process.
     void build() {
+        CompilationDatabase db;
+        build(db);
+    }
+
+    // Ready. Set. Go!
+    // Start the build process using given compilation database.
+    void build(CompilationDatabase& compdb) {
         log("INFO", "Building target {}", m_target_name);
-        CompilationDatabase compdb;
         if (!std::filesystem::exists(m_build_dir)) {
             std::filesystem::create_directories(m_build_dir);
         }
@@ -895,6 +907,7 @@ class Target {
             std::filesystem::create_directories(m_build_dir / "dest");
         }
 
+        // Compilation stage
         log("INFO", "Compiling target {}", m_target_name);
         std::unordered_map<std::string, std::string> src_to_obj;
         for (auto cxxsrc : m_cxx_files) {
@@ -909,6 +922,7 @@ class Target {
 
         compdb.build();
 
+        // Linking stage
         log("INFO", "Linking or archiving target {}", m_target_name);
         std::vector<std::string> objs;
         for (auto kv : src_to_obj) {
@@ -922,6 +936,31 @@ class Target {
         log("INFO", "Cleaning target {}", m_target_name);
         if (std::filesystem::exists(m_build_dir))
             std::filesystem::remove_all(m_build_dir);
+    }
+
+    // Get build artifact (may not exist)
+    std::filesystem::path get_build_artifact() {
+        return m_build_dir / "dest" / m_target_name;
+    }
+
+    // Get compiler flags for C.
+    std::vector<std::string> get_cflags() {
+        return m_cflags;
+    }
+
+    // Get compile flags for C++.
+    std::vector<std::string> get_cxxflags() {
+        return m_cxxflags;
+    }
+
+    // Get linker flags.
+    std::vector<std::string> get_ldflags() {
+        return m_ldflags;
+    }
+
+    // Get artifact type.
+    ArtifactType get_artifact_type() {
+        return m_atype;
     }
 
 };

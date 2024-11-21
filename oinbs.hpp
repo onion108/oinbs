@@ -915,7 +915,7 @@ class Target {
             compdb.compile_cxx_source(cxxsrc, m_build_dir / "obj" / src_to_obj[cxxsrc], m_cxxflags, false);
         }
 
-        for (auto csrc : m_cxx_files) {
+        for (auto csrc : m_c_files) {
             src_to_obj[csrc] = m_generate_obj_name(csrc);
             compdb.compile_c_source(csrc, m_build_dir / "obj" / src_to_obj[csrc], m_cxxflags, false);
         }

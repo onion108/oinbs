@@ -417,6 +417,26 @@ inline void go_rebuild_urself(int argc, char **argv, std::source_location loc = 
 
 // }}}
 
+// {{{ Apple thingy
+
+// Modify install name of a dylib.
+inline void modify_install_name(std::string_view bin, std::string_view old_dylib, std::string_view new_dylib) {
+#if __APPLE__
+    auto result = execute_command({ "install_name_tool", "-change", std::string(old_dylib), std::string(new_dylib) });
+    if (result.ret_code) {
+        throw std::runtime_error(std::format("Failed to change install name of {} to {} because of: {}", old_dylib, new_dylib, result.stderr_content));
+    }
+#endif
+}
+
+// Append `@rpath/` to the dynamic library file name.
+inline void rpathify_lib(std::string_view bin, std::string_view dylib) {
+    using namespace std::string_literals;
+    modify_install_name(bin, dylib, "@rpath/"s + dylib);
+}
+
+// }}}
+
 // {{{ File extension checks
 
 // Check if input is C++ source file.

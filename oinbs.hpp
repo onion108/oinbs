@@ -432,7 +432,7 @@ inline void modify_install_name(std::string_view bin, std::string_view old_dylib
 // Append `@rpath/` to the dynamic library file name.
 inline void rpathify_lib(std::string_view bin, std::string_view dylib) {
     using namespace std::string_literals;
-    modify_install_name(bin, dylib, "@rpath/"s + dylib);
+    modify_install_name(bin, dylib, "@rpath/"s + std::string(dylib));
 }
 
 // }}}

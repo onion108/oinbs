@@ -32,6 +32,10 @@
 
 OINBS_NAMESPACE_BEGIN
 
+// {{{ Global Variables
+inline std::string g_build_script_name = "\\/\\/";
+// }}}
+
 // {{{ Utilities
 
 // Escapes string
@@ -191,6 +195,39 @@ inline std::vector<std::string> walk_dir(std::filesystem::path path) {
 
 // }}}
 
+// {{{ File extension
+
+// Check if input is C++ source file.
+inline bool is_cxx_source(std::string_view name) {
+    return name.ends_with(".cc") || name.ends_with(".cxx") || name.ends_with(".cpp");
+}
+
+// Check if input is C source file.
+inline bool is_c_source(std::string_view name) {
+    return name.ends_with(".c");
+}
+
+// Check if input is C++ header file.
+inline bool is_cxx_header(std::string name) {
+    return name.ends_with(".h") || name.ends_with(".hh") || name.ends_with(".hpp");
+}
+
+// Check if input is C header file.
+inline bool is_c_header(std::string name) {
+    return name.ends_with(".h");
+}
+
+// Strip file extension.
+inline std::string strip_file_extension(std::string_view filename) {
+    auto idx = filename.find_last_of(".");
+    if (idx == std::string_view::npos) {
+        return std::string { filename };
+    }
+    return std::string { filename.substr(0, idx) };
+}
+
+// }}}
+
 // {{{ Platform specific thingy
 
 // Structure represents the result of a command execution.
@@ -208,7 +245,7 @@ inline void execute_nofork(char **argv) {
 }
 
 // Execute command using parameter `argv`.
-inline CommandOutput execute_command(const std::vector<std::string>& argv) {
+inline CommandOutput execute_command(const std::vector<std::string>& argv, bool redirect_output = true) {
     log("INFO", "Executing command: {}", render_command(argv));
 
     int pout[2], perr[2];
@@ -217,8 +254,10 @@ inline CommandOutput execute_command(const std::vector<std::string>& argv) {
     auto child_pid = fork();
     if (child_pid == -1) throw std::runtime_error("Failed to fork child process, damn it! ");
     if (child_pid == 0) {
-        dup2(pout[1], STDOUT_FILENO);
-        dup2(perr[1], STDERR_FILENO);
+        if (redirect_output) {
+            dup2(pout[1], STDOUT_FILENO);
+            dup2(perr[1], STDERR_FILENO);
+        }
         close(pout[0]); close(pout[1]);
         close(perr[0]); close(perr[1]);
 
@@ -242,15 +281,20 @@ inline CommandOutput execute_command(const std::vector<std::string>& argv) {
         char buf[1024];
         std::size_t size;
         CommandOutput result;
-        while ((size = read(pout[0], buf, 1024)) != 0) {
-            for (std::size_t idx = 0; idx < size; idx++) {
-                result.stdout_content.push_back(buf[idx]);
+        if (redirect_output) {
+            while ((size = read(pout[0], buf, 1024)) != 0) {
+                for (std::size_t idx = 0; idx < size; idx++) {
+                    result.stdout_content.push_back(buf[idx]);
+                }
             }
-        }
-        while ((size = read(perr[0], buf, 1024)) != 0) {
-            for (std::size_t idx = 0; idx < size; idx++) {
-                result.stderr_content.push_back(buf[idx]);
+            while ((size = read(perr[0], buf, 1024)) != 0) {
+                for (std::size_t idx = 0; idx < size; idx++) {
+                    result.stderr_content.push_back(buf[idx]);
+                }
             }
+        } else {
+            result.stdout_content = "<invalid>";
+            result.stderr_content = "<invalid>";
         }
         waitpid(child_pid, &result.ret_code, 0);
         return result;
@@ -408,11 +452,59 @@ inline void compile_c_if_necessary(std::string_view src, std::string_view dest, 
 // Rebuild the build script if source has been modified.
 inline void go_rebuild_urself(int argc, char **argv, std::source_location loc = std::source_location::current()) {
     using namespace std::string_literals;
+    g_build_script_name = argv[0];
     if (is_newer(loc.file_name(), argv[0])) {
         log("INFO", "Self-rebuilding... ");
         compile_cxx_source(loc.file_name(), argv[0], { "-std=c++20"s });
         execute_nofork(argv);
     }
+}
+
+// }}}
+
+// {{{ Call other build scripts
+
+// Call build script at `path`. `path` should be path to the source file of the build script.
+// The bootstrapping will be done by the current build script if it haven't been done yet.
+// Extra arguments could be passed by using `args` argument. Defaults to `{}`.
+inline void invoke_build_script(std::filesystem::path path, std::vector<std::string> args = {}) {
+    if (!path.has_parent_path()) {
+        throw std::runtime_error(std::format("Path {} doesn't have parent path", path.string()));
+    }
+    auto cwd = std::filesystem::current_path();
+    std::filesystem::current_path(path.parent_path());
+
+    auto bs_build_name = path.filename().string();
+    auto bs_build_src = bs_build_name;
+    if (!is_cxx_source(bs_build_src)) {
+        std::filesystem::current_path(cwd);
+        throw std::runtime_error(std::format("{} is not a valid C++ source file", bs_build_name));
+    }
+    bs_build_name = strip_file_extension(bs_build_src);
+    
+    if (!std::filesystem::exists(bs_build_name)) {
+        log("INFO", "Bootstrapping build script {}", path.string());
+        try {
+            compile_cxx_source(bs_build_src, bs_build_name, { "-std=c++20" });
+        } catch (const std::runtime_error& e) {
+            log("ERROR", "Failed to bootstrap build script: {}", e.what());
+            std::filesystem::current_path(cwd);
+            throw e;
+        }
+        log("INFO", "Build script successfully bootstrapped");
+    }
+
+    log("INFO", "Executing build script {}", path.string());
+    std::vector<std::string> argv = args;
+    args.insert(args.begin(), "./" + bs_build_name);
+    auto result = execute_command(args, false);
+    if (result.ret_code) {
+        std::filesystem::current_path(cwd);
+        throw std::runtime_error(std::format("Failed to execute build script {}", path.string()));
+    }
+
+    // Restore cwd.
+    std::filesystem::current_path(cwd);
 }
 
 // }}}
@@ -433,30 +525,6 @@ inline void modify_install_name(std::string_view bin, std::string_view old_dylib
 inline void rpathify_lib(std::string_view bin, std::string_view dylib) {
     using namespace std::string_literals;
     modify_install_name(bin, dylib, "@rpath/"s + std::string(dylib));
-}
-
-// }}}
-
-// {{{ File extension checks
-
-// Check if input is C++ source file.
-inline bool is_cxx_source(std::string_view name) {
-    return name.ends_with(".cc") || name.ends_with(".cxx") || name.ends_with(".cpp");
-}
-
-// Check if input is C source file.
-inline bool is_c_source(std::string_view name) {
-    return name.ends_with(".c");
-}
-
-// Check if input is C++ header file.
-inline bool is_cxx_header(std::string name) {
-    return name.ends_with(".h") || name.ends_with(".hh") || name.ends_with(".hpp");
-}
-
-// Check if input is C header file.
-inline bool is_c_header(std::string name) {
-    return name.ends_with(".h");
 }
 
 // }}}
@@ -771,6 +839,24 @@ class Target {
         return *this;
     }
 
+    // Set C++ optimization level.
+    Target& set_cxx_optimization(std::string_view level) {
+        m_cxxflags.push_back(std::format("-O{}", level));
+        return *this;
+    }
+
+    // Set C optimization level.
+    Target& set_c_optimization(std::string_view level) {
+        m_cflags.push_back(std::format("-O{}", level));
+        return *this;
+    }
+
+    // Set optimization level.
+    Target& set_optimization(std::string_view level) {
+        set_c_optimization(level);
+        return set_cxx_optimization(level);
+    }
+
     // Enable debug information.
     Target& debug() {
         m_cflags.push_back("-g");
@@ -914,6 +1000,10 @@ class Target {
     // Ready. Set. Go!
     // Start the build process using given compilation database.
     void build(CompilationDatabase& compdb) {
+        if (g_build_script_name == "\\/\\/") {
+            log("WARNING", "Did you forget to call go_rebuild_urself? g_build_script_name doesn't detected. ");
+        }
+
         log("INFO", "Building target {}", m_target_name);
         if (!std::filesystem::exists(m_build_dir)) {
             std::filesystem::create_directories(m_build_dir);
@@ -925,6 +1015,18 @@ class Target {
 
         if (!std::filesystem::exists(get_build_artifact_dir())) {
             std::filesystem::create_directories(get_build_artifact_dir());
+        }
+
+        // Create dummy file to indicate build time.
+        if (!std::filesystem::exists(m_build_dir / "dummy")) {
+            std::ofstream ofs("dummy");
+            ofs << "DUMMY FILE DONT TOUCH";
+            ofs.close();
+        } else {
+            if (g_build_script_name != "\\/\\/" && is_newer(g_build_script_name, (m_build_dir / "dummy").string())) {
+                log("INFO", "Build script changed detected");
+                clean();
+            }
         }
 
         // Compilation stage
@@ -1003,7 +1105,6 @@ class Target {
 // }}}
 
 // }}}
-
 
 OINBS_NAMESPACE_END
 

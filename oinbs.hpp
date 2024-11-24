@@ -923,8 +923,8 @@ class Target {
             std::filesystem::create_directories(m_build_dir / "obj");
         }
 
-        if (!std::filesystem::exists(m_build_dir / "dest")) {
-            std::filesystem::create_directories(m_build_dir / "dest");
+        if (!std::filesystem::exists(get_build_artifact_dir())) {
+            std::filesystem::create_directories(get_build_artifact_dir());
         }
 
         // Compilation stage
@@ -948,7 +948,7 @@ class Target {
         for (auto kv : src_to_obj) {
             objs.push_back(m_build_dir / "obj" / kv.second);
         }
-        link_artifact(objs, m_build_dir / "dest" / m_target_name, m_ldflags, m_atype, !m_cxx_files.empty());
+        link_artifact(objs, get_build_artifact(), m_ldflags, m_atype, !m_cxx_files.empty());
     }
 
     // Clean the build directory
@@ -958,9 +958,19 @@ class Target {
             std::filesystem::remove_all(m_build_dir);
     }
 
-    // Get build artifact (may not exist)
+    // Get build artifact (may not exist).
     std::filesystem::path get_build_artifact() {
-        return m_build_dir / "dest" / m_target_name;
+        return get_build_artifact_dir() / m_target_name;
+    }
+
+    // Get build artifact directory.
+    std::filesystem::path get_build_artifact_dir() {
+        return m_build_dir / "dest";
+    }
+
+    // Get build directory.
+    std::filesystem::path get_build_dir() {
+        return m_build_dir;
     }
 
     // Get compiler flags for C.
@@ -981,6 +991,11 @@ class Target {
     // Get artifact type.
     ArtifactType get_artifact_type() {
         return m_atype;
+    }
+
+    // Get Target name.
+    std::string get_name() {
+        return m_target_name;
     }
 
 };

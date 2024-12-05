@@ -622,6 +622,7 @@ class CompilationDatabase {
 
     std::vector<Operation> m_operations;
     bool m_use_lazy_compilation;
+    bool m_dummy;
     std::string m_render_entry(const Entry& entry) {
         std::string args;
         if (entry.args.empty()) {
@@ -648,7 +649,7 @@ class CompilationDatabase {
         return result;
     }
     public:
-    CompilationDatabase(bool lazy = true) : m_operations(), m_use_lazy_compilation(lazy) {}
+    CompilationDatabase(bool lazy = true, bool dummy = false) : m_operations(), m_use_lazy_compilation(lazy), m_dummy(dummy) {}
     void compile_c_source(const std::string& src, const std::string& dest, const std::vector<std::string>& args = {}, bool link_executable = true) {
         m_operations.push_back({ src, dest, args, link_executable, false});
     }
@@ -674,6 +675,9 @@ class CompilationDatabase {
     }
 
     std::string generate_database() {
+
+        // Dummy compdb doesn't generate anything.
+        if (m_dummy) return "";
 
         // Use unordered_map to avoid duplicated items.
         std::unordered_map<std::string, Entry> db;
@@ -701,6 +705,8 @@ class CompilationDatabase {
 
     void build() {
         perform();
+
+        if (m_dummy) return;
         auto db = generate_database();
         std::ofstream comp_db("compile_commands.json");
         comp_db << db << '\n';

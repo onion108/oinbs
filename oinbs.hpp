@@ -492,7 +492,7 @@ inline void invoke_build_script(std::filesystem::path path, std::vector<std::str
         throw std::runtime_error(std::format("{} is not a valid C++ source file", bs_build_name));
     }
     bs_build_name = strip_file_extension(bs_build_src);
-    
+
     if (!std::filesystem::exists(bs_build_name)) {
         log("INFO", "Bootstrapping build script {}", path.string());
         try {

@@ -460,14 +460,19 @@ inline void compile_c_if_necessary(std::string_view src, std::string_view dest, 
     compile_c_source(src, dest, args, link_executable);
 }
 
+// Rebuild the build script.
+inline void rebuild_urself(int argc, char **argv, std::source_location loc = std::source_location::current()) {
+    using namespace std::string_literals;
+    log("INFO", "Self-rebuilding... ");
+    compile_cxx_source(loc.file_name(), argv[0], { "-std=c++20"s });
+    execute_nofork(argv);
+}
+
 // Rebuild the build script if source has been modified.
 inline void go_rebuild_urself(int argc, char **argv, std::source_location loc = std::source_location::current()) {
-    using namespace std::string_literals;
     g_build_script_name = argv[0];
     if (is_newer(loc.file_name(), argv[0])) {
-        log("INFO", "Self-rebuilding... ");
-        compile_cxx_source(loc.file_name(), argv[0], { "-std=c++20"s });
-        execute_nofork(argv);
+        rebuild_urself(argc, argv, loc);
     }
 }
 
@@ -1036,7 +1041,7 @@ class Target {
 
         // Create dummy file to indicate build time.
         if (!std::filesystem::exists(m_build_dir / "dummy")) {
-            std::ofstream ofs("dummy");
+            std::ofstream ofs(m_build_dir / "dummy");
             ofs << "DUMMY FILE DONT TOUCH";
             ofs.close();
         } else {

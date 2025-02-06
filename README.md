@@ -53,7 +53,7 @@ And you're ready to go!
 
 ## Compilation Database
 
-You can use the class `CompilationDatabase` to generate compilation database. This class provides methods `compile_cxx_source` and `compile_c_source` that has the same signature as in the `oinbs` namespace, and we use a parameter when constructing the database (`lazy`) to indicate whether to use `compile_*_if_necessary` or `compile_*-source`. The `build` method performs the compilation and writes the compilation process into `compile_flags.json`. Notice that it doesn't handle linking so you still need to link by yourself after calling `build` method.
+You can use the class `CompilationDatabase` to generate compilation database. This class provides methods `compile_cxx_source` and `compile_c_source` that has the same signature as in the `oinbs` namespace, and we use a parameter when constructing the database (`lazy`) to indicate whether to use `compile_*_if_necessary` or `compile_*_source`. The `build` method performs the compilation and writes the compilation process into `compile_flags.json`. Notice that it doesn't handle linking so you still need to link by yourself after calling `build` method.
 
 Here is the same example at the start with compilation database support enabled:
 
